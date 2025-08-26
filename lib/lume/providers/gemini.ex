@@ -168,11 +168,12 @@ defmodule Lume.Providers.Gemini do
     %{text: text}
   end
 
-  defp convert_content_part(%{type: :image, content: image_data}, model) do
+  defp convert_content_part(%{type: :image, content: image_data} = part, model) do
     if model_supports_vision?(model) do
+      mime_type = Map.get(part, :mime_type) || detect_image_mime_type(image_data)
       %{
         inline_data: %{
-          mime_type: detect_image_mime_type(image_data),
+          mime_type: mime_type,
           data: format_image_data(image_data)
         }
       }
@@ -200,12 +201,17 @@ defmodule Lume.Providers.Gemini do
 
   defp detect_image_mime_type("data:image/" <> rest) do
     case String.split(rest, ";", parts: 2) do
-      [mime_type, _] -> "image/#{mime_type}"
-      _ -> "image/jpeg"
+      [mime_type, _] when mime_type in ["png", "jpeg", "jpg", "webp", "heic", "heif"] -> 
+        "image/#{mime_type}"
+      _ -> 
+        "image/jpeg"
     end
   end
 
-  defp detect_image_mime_type(_), do: "image/jpeg"
+  defp detect_image_mime_type(_) do
+    # Default to JPEG when format cannot be determined
+    "image/jpeg"
+  end
 
   defp model_supports_vision?(nil), do: true
   defp model_supports_vision?(model), do: get_in(@models, [model, :vision]) || false
@@ -224,8 +230,9 @@ defmodule Lume.Providers.Gemini do
     ]
 
     url = "#{@base_url}/v1beta/models/#{model}:#{endpoint}"
+    timeout = Keyword.get(opts, :timeout, 30_000)
 
-    Req.new(headers: headers)
+    Req.new(headers: headers, receive_timeout: timeout)
     |> Lume.Circuit.attach_fuse(opts)
     |> Req.post(url: url, json: body)
   end

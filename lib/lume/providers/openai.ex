@@ -107,11 +107,12 @@ defmodule Lume.Providers.OpenAI do
     %{type: "text", text: text}
   end
 
-  defp convert_content_part(%{type: :image, content: image_data}) do
+  defp convert_content_part(%{type: :image, content: image_data} = part) do
+    mime_type = Map.get(part, :mime_type) || detect_image_mime_type(image_data)
     %{
       type: "image_url",
       image_url: %{
-        url: format_image_data(image_data)
+        url: format_image_data(image_data, mime_type)
       }
     }
   end
@@ -124,8 +125,22 @@ defmodule Lume.Providers.OpenAI do
     %{type: "text", text: "[Files not yet supported]"}
   end
 
-  defp format_image_data("data:" <> _ = data_url), do: data_url
-  defp format_image_data(base64_data), do: "data:image/jpeg;base64,#{base64_data}"
+  defp format_image_data("data:" <> _ = data_url, _mime_type), do: data_url
+  defp format_image_data(base64_data, mime_type), do: "data:#{mime_type};base64,#{base64_data}"
+
+  defp detect_image_mime_type("data:image/" <> rest) do
+    case String.split(rest, ";", parts: 2) do
+      [mime_type, _] when mime_type in ["png", "jpeg", "jpg", "webp", "gif"] -> 
+        "image/#{mime_type}"
+      _ -> 
+        "image/jpeg"
+    end
+  end
+
+  defp detect_image_mime_type(_) do
+    # Default to JPEG when format cannot be determined
+    "image/jpeg"
+  end
 
   defp maybe_add_streaming(request, opts) do
     if Keyword.get(opts, :stream, false) do
@@ -173,8 +188,9 @@ defmodule Lume.Providers.OpenAI do
     ]
 
     url = "#{@base_url}#{path}"
+    timeout = Keyword.get(opts, :timeout, 30_000)
 
-    Req.new(headers: headers)
+    Req.new(headers: headers, receive_timeout: timeout)
     |> Lume.Circuit.attach_fuse(opts)
     |> Req.post(url: url, json: body)
   end

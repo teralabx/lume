@@ -60,10 +60,10 @@ defmodule Lume do
 
   def text(lume, content), do: user(lume, content)
 
-  def image(lume, content) do
+  def image(lume, content, mime_type \\ nil) do
     case Lume.Media.process_content(content) do
       {:ok, processed_data} ->
-        add_content_part(lume, :image, processed_data)
+        add_content_part(lume, :image, processed_data, nil, mime_type)
 
       {:error, reason} ->
         add_error(lume, "Invalid image content: #{reason}")
@@ -123,12 +123,13 @@ defmodule Lume do
     %{lume | messages: lume.messages ++ [message]}
   end
 
-  defp add_content_part(lume, type, content, filename \\ nil) do
+  defp add_content_part(lume, type, content, filename \\ nil, mime_type \\ nil) do
     part =
-      if filename do
-        %{type: type, content: content, filename: filename, id: next_id()}
-      else
-        %{type: type, content: content, id: next_id()}
+      case {filename, mime_type} do
+        {nil, nil} -> %{type: type, content: content, id: next_id()}
+        {filename, nil} -> %{type: type, content: content, filename: filename, id: next_id()}
+        {nil, mime_type} -> %{type: type, content: content, mime_type: mime_type, id: next_id()}
+        {filename, mime_type} -> %{type: type, content: content, filename: filename, mime_type: mime_type, id: next_id()}
       end
 
     # Add to last user message or create one
@@ -199,10 +200,14 @@ defmodule Lume do
       end
     end
 
-    Enum.reduce_while(0..retries, {:error, :all_retries_failed}, fn _, _ ->
+    Enum.reduce_while(0..retries, {:error, :all_retries_failed}, fn _, _acc ->
       case attempt.() do
-        {:ok, res} -> {:halt, {:ok, res}}
-        {:error, _} -> {:cont, {:error, :all_retries_failed}}
+        {:ok, res} -> 
+          {:halt, {:ok, res}}
+        {:error, :missing_api_key} = err -> 
+          {:halt, err}
+        {:error, reason} -> 
+          {:cont, {:error, reason}}
       end
     end)
   end
