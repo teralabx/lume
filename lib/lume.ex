@@ -1,18 +1,219 @@
 defmodule Lume do
   @moduledoc """
-  Documentation for `Lume`.
+  Lume - Minimalistic AI Client with chaining, cost tracking, and session management.
+  Inspired by Ecto.Multi for building AI pipelines with resilience patterns.
   """
 
-  @doc """
-  Hello world.
+  @type content_part ::
+          %{type: :text, content: String.t(), id: String.t()}
+          | %{type: :image, content: String.t(), id: String.t()}
+          | %{type: :audio, content: String.t(), id: String.t()}
+          | %{type: :file, content: String.t(), filename: String.t(), id: String.t()}
 
-  ## Examples
+  @type message :: %{
+          role: :system | :user | :assistant,
+          content: list(content_part()) | String.t(),
+          id: String.t()
+        }
 
-      iex> Lume.hello()
-      :world
+  @type t :: %__MODULE__{
+          provider_module: module() | nil,
+          model: String.t() | nil,
+          messages: list(message()),
+          last_result: any() | nil,
+          session: String.t() | nil,
+          cost: float(),
+          tokens_used: integer(),
+          errors: list(String.t()),
+          opts: keyword()
+        }
 
-  """
-  def hello do
-    :world
+  defstruct [
+    :provider_module,
+    :model,
+    :last_result,
+    messages: [],
+    session: nil,
+    cost: 0.0,
+    tokens_used: 0,
+    errors: [],
+    opts: []
+  ]
+
+  def new(), do: %__MODULE__{}
+
+  def provider(lume, module) when is_atom(module) do
+    %{lume | provider_module: module}
+  end
+
+  def model(lume, model_name) when is_binary(model_name) do
+    %{lume | model: model_name}
+  end
+
+  def system(lume, content) do
+    add_message(lume, :system, content)
+  end
+
+  def user(lume, content) do
+    add_message(lume, :user, content)
+  end
+
+  def text(lume, content), do: user(lume, content)
+
+  def image(lume, content) do
+    case Lume.Utils.process_content(content) do
+      {:ok, processed_data} -> 
+        add_content_part(lume, :image, processed_data)
+      {:error, reason} -> 
+        add_error(lume, "Invalid image content: #{reason}")
+    end
+  end
+
+  def audio(lume, content) do
+    case Lume.Utils.process_content(content) do
+      {:ok, processed_data} -> 
+        add_content_part(lume, :audio, processed_data)
+      {:error, reason} -> 
+        add_error(lume, "Invalid audio content: #{reason}")
+    end
+  end
+
+  # Throwing versions
+  def image!(lume, content) do
+    result = image(lume, content)
+    if has_errors?(result), do: raise(ArgumentError, get_recent_error(result)), else: result
+  end
+
+  def audio!(lume, content) do
+    result = audio(lume, content)
+    if has_errors?(result), do: raise(ArgumentError, get_recent_error(result)), else: result
+  end
+
+  # Helper functions
+  defp add_error(lume, error_message) do
+    %{lume | errors: [error_message | lume.errors]}
+  end
+
+  defp has_errors?(%{errors: []}), do: false
+  defp has_errors?(_), do: true
+
+  defp get_recent_error(%{errors: [recent | _]}), do: recent
+  defp get_recent_error(%{errors: []}), do: nil
+
+  def file(lume, file_data, filename \\ "file") do
+    add_content_part(lume, :file, file_data, filename)
+  end
+
+  def opts(lume, opts), do: %{lume | opts: Keyword.merge(lume.opts, opts)}
+
+  def remove_message(lume, id) do
+    %{lume | messages: Enum.reject(lume.messages, &(&1.id == id))}
+  end
+
+  # Private helpers
+  defp add_message(lume, role, content) do
+    message = %{
+      role: role,
+      content: content,
+      id: next_id()
+    }
+
+    %{lume | messages: lume.messages ++ [message]}
+  end
+
+  defp add_content_part(lume, type, content, filename \\ nil) do
+    part =
+      if filename do
+        %{type: type, content: content, filename: filename, id: next_id()}
+      else
+        %{type: type, content: content, id: next_id()}
+      end
+
+    # Add to last user message or create one
+    case List.last(lume.messages) do
+      %{role: :user} = msg ->
+        updated_content =
+          case msg.content do
+            text when is_binary(text) ->
+              [%{type: :text, content: text, id: next_id()}, part]
+
+            parts when is_list(parts) ->
+              parts ++ [part]
+          end
+
+        updated_msg = %{msg | content: updated_content}
+        messages = List.replace_at(lume.messages, -1, updated_msg)
+        %{lume | messages: messages}
+
+      _ ->
+        # No user message, create one
+        add_message(lume, :user, [part])
+    end
+  end
+
+  defp next_id do
+    UUID.uuid4()
+  end
+
+  def new_session(lume) do
+    session_id = :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+    %{lume | session: session_id, messages: []}
+  end
+
+  def call(%__MODULE__{provider_module: nil}), do: {:error, :no_provider}
+
+  def call(%__MODULE__{provider_module: mod} = lume) do
+    retries = Keyword.get(lume.opts, :retries, 0)
+
+    attempt = fn ->
+      case mod.call(lume) do
+        {:ok, updated_lume} ->
+          # Add assistant response to conversation history
+          assistant_message = %{
+            role: :assistant,
+            content: updated_lume.last_result,
+            id: next_id()
+          }
+
+          final_lume = %{updated_lume | messages: updated_lume.messages ++ [assistant_message]}
+          {:ok, final_lume}
+
+        {:error, _} = err ->
+          err
+      end
+    end
+
+    Enum.reduce_while(0..retries, {:error, :all_retries_failed}, fn _, _ ->
+      case attempt.() do
+        {:ok, res} -> {:halt, {:ok, res}}
+        {:error, _} -> {:cont, {:error, :all_retries_failed}}
+      end
+    end)
+  end
+
+  def stream(%__MODULE__{provider_module: nil}), do: {:error, :no_provider}
+
+  def stream(%__MODULE__{provider_module: mod} = lume) do
+    # Try to call stream, catch if not implemented
+    try do
+      mod.stream(lume)
+    rescue
+      UndefinedFunctionError -> {:error, :streaming_not_supported}
+    end
+  end
+
+
+  def call_async(%__MODULE__{provider_module: nil}), do: {:error, :no_provider}
+
+  def call_async(%__MODULE__{} = lume) do
+    task = Task.async(fn -> call(lume) end)
+    {:ok, task}
+  end
+
+  def chain(lume, func) when is_function(func, 1) do
+    case call(lume) do
+      {:ok, updated_lume} -> func.(updated_lume)
+      {:error, _} = err -> err
+    end
   end
 end
