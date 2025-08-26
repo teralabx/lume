@@ -15,7 +15,7 @@ defmodule ImageHelper do
   """
   def get_test_image(width \\ 300, height \\ 200, seed \\ 42) do
     cache_file = Path.join(@cache_dir, "#{width}x#{height}_#{seed}.jpg")
-    
+
     if File.exists?(cache_file) do
       cache_file
       |> File.read!()
@@ -55,15 +55,15 @@ defmodule ImageHelper do
 
   defp download_and_cache_image(width, height, seed, cache_file) do
     url = "https://picsum.photos/#{width}/#{height}?random=#{seed}"
-    
+
     case Req.get(url, redirect: true) do
       {:ok, %{status: 200, body: body}} ->
         File.write!(cache_file, body)
         Base.encode64(body)
-      
+
       {:error, reason} ->
         raise "Failed to download test image: #{inspect(reason)}"
-        
+
       {:ok, %{status: status}} ->
         raise "Failed to download test image, status: #{status}"
     end

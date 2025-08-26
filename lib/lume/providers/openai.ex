@@ -109,6 +109,7 @@ defmodule Lume.Providers.OpenAI do
 
   defp convert_content_part(%{type: :image, content: image_data} = part) do
     mime_type = Map.get(part, :mime_type) || detect_image_mime_type(image_data)
+
     %{
       type: "image_url",
       image_url: %{
@@ -130,9 +131,10 @@ defmodule Lume.Providers.OpenAI do
 
   defp detect_image_mime_type("data:image/" <> rest) do
     case String.split(rest, ";", parts: 2) do
-      [mime_type, _] when mime_type in ["png", "jpeg", "jpg", "webp", "gif"] -> 
+      [mime_type, _] when mime_type in ["png", "jpeg", "jpg", "webp", "gif"] ->
         "image/#{mime_type}"
-      _ -> 
+
+      _ ->
         "image/jpeg"
     end
   end

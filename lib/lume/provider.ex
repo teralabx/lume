@@ -25,5 +25,11 @@ defmodule Lume.Provider do
   """
   @callback stream(lume :: Lume.t()) :: {:ok, Stream.t()} | {:error, any()}
 
-  @optional_callbacks [stream: 1]
+  @doc """
+  Generate embeddings from the provided content.
+  Returns updated Lume struct with embedding vectors as last_result.
+  """
+  @callback embeddings(lume :: Lume.t(), opts :: keyword()) :: {:ok, Lume.t()} | {:error, any()}
+
+  @optional_callbacks [stream: 1, embeddings: 2]
 end

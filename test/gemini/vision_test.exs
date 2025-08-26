@@ -17,7 +17,7 @@ defmodule Lume.Gemini.VisionTest do
   describe "image analysis" do
     test "analyzes small test image" do
       image_data = ImageHelper.get_small_image()
-      
+
       {:ok, result} =
         Lume.Gemini.flash()
         |> Lume.system("Describe what you see in this image.")
@@ -35,7 +35,9 @@ defmodule Lume.Gemini.VisionTest do
       {:ok, result} =
         Lume.Gemini.flash()
         |> Lume.system("You are an expert image analyst.")
-        |> Lume.text("Analyze this image and tell me about its dimensions, colors, and any patterns you observe.")
+        |> Lume.text(
+          "Analyze this image and tell me about its dimensions, colors, and any patterns you observe."
+        )
         |> Lume.image(ImageHelper.get_medium_image(), ImageHelper.get_mime_type())
         |> Lume.call()
 
@@ -63,7 +65,9 @@ defmodule Lume.Gemini.VisionTest do
       {:ok, result} =
         Lume.Gemini.flash()
         |> Lume.system("You are a helpful visual assistant.")
-        |> Lume.text("Please describe this image and then tell me what you think about simplicity in design.")
+        |> Lume.text(
+          "Please describe this image and then tell me what you think about simplicity in design."
+        )
         |> Lume.image(ImageHelper.get_small_image(), ImageHelper.get_mime_type())
         |> Lume.call()
 
@@ -88,7 +92,8 @@ defmodule Lume.Gemini.VisionTest do
 
       assert is_binary(continued.last_result)
       assert String.length(continued.last_result) > 10
-      assert length(continued.messages) == 5  # system, user+image1, assistant, user+image2, assistant
+      # system, user+image1, assistant, user+image2, assistant
+      assert length(continued.messages) == 5
     end
   end
 
@@ -191,7 +196,8 @@ defmodule Lume.Gemini.VisionTest do
       # Vision requests should have reasonable cost and token usage
       # (comparing with text-only can be flaky due to response length variations)
       assert result.cost > 0
-      assert result.tokens_used > 50  # Should use more than minimal tokens for vision
+      # Should use more than minimal tokens for vision
+      assert result.tokens_used > 50
     end
   end
 end

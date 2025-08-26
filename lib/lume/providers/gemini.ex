@@ -171,6 +171,7 @@ defmodule Lume.Providers.Gemini do
   defp convert_content_part(%{type: :image, content: image_data} = part, model) do
     if model_supports_vision?(model) do
       mime_type = Map.get(part, :mime_type) || detect_image_mime_type(image_data)
+
       %{
         inline_data: %{
           mime_type: mime_type,
@@ -201,9 +202,10 @@ defmodule Lume.Providers.Gemini do
 
   defp detect_image_mime_type("data:image/" <> rest) do
     case String.split(rest, ";", parts: 2) do
-      [mime_type, _] when mime_type in ["png", "jpeg", "jpg", "webp", "heic", "heif"] -> 
+      [mime_type, _] when mime_type in ["png", "jpeg", "jpg", "webp", "heic", "heif"] ->
         "image/#{mime_type}"
-      _ -> 
+
+      _ ->
         "image/jpeg"
     end
   end
@@ -250,6 +252,111 @@ defmodule Lume.Providers.Gemini do
 
   defp extract_content_from_chunk(chunk) when is_map(chunk) do
     get_in(chunk, ["candidates", Access.at(0), "content", "parts", Access.at(0), "text"])
+  end
+
+  @doc """
+  Generate embeddings for text content using Gemini embedding models.
+
+  ## Options
+  - `:task_type` - Embedding optimization type (default: "SEMANTIC_SIMILARITY")
+  - `:output_dimensionality` - Vector size: 128-3072 (recommended: 768, 1536, 3072)
+  - `:model` - Embedding model (default: "gemini-embedding-001")
+
+  ## Examples
+      {:ok, embeddings} = Lume.Providers.Gemini.embeddings(lume)
+      {:ok, embeddings} = Lume.Providers.Gemini.embeddings(lume, 
+        task_type: "SEMANTIC_SIMILARITY", 
+        output_dimensionality: 768
+      )
+  """
+  @impl true
+  def embeddings(%Lume{} = lume, opts \\ []) do
+    with {:ok, api_key} <- get_api_key(),
+         model <- Keyword.get(opts, :model, "gemini-embedding-001"),
+         request <- build_embedding_request(lume, opts),
+         {:ok, %{status: 200, body: response}} <-
+           make_embedding_request(model, request, api_key, lume.opts) do
+      embeddings = extract_embeddings_from_response(response)
+
+      updated_lume = %{lume | last_result: embeddings}
+
+      {:ok, updated_lume}
+    else
+      {:error, reason} -> {:error, reason}
+      {:ok, %{status: status, body: body}} -> {:error, {status, body}}
+    end
+  end
+
+  defp build_embedding_request(%Lume{messages: messages}, opts) do
+    # Extract text content from messages
+    text_content = extract_text_for_embedding(messages)
+    model = Keyword.get(opts, :model, "gemini-embedding-001")
+
+    request = %{
+      model: "models/#{model}",
+      content: %{
+        parts: [%{text: text_content}]
+      }
+    }
+
+    request
+    |> maybe_add_embedding_config(opts)
+  end
+
+  defp extract_text_for_embedding(messages) do
+    # Combine all text content from messages
+    messages
+    |> Enum.map(&extract_text_from_message/1)
+    |> Enum.filter(&(&1 != nil && &1 != ""))
+    |> Enum.join(" ")
+  end
+
+  defp extract_text_from_message(%{content: content}) when is_binary(content), do: content
+
+  defp extract_text_from_message(%{content: content_parts}) when is_list(content_parts) do
+    content_parts
+    |> Enum.filter(&(&1.type == :text))
+    |> Enum.map(& &1.content)
+    |> Enum.join(" ")
+  end
+
+  defp extract_text_from_message(_), do: nil
+
+  defp maybe_add_embedding_config(request, opts) do
+    request =
+      case Keyword.get(opts, :task_type) do
+        nil -> request
+        task_type -> Map.put(request, :taskType, task_type)
+      end
+
+    request =
+      case Keyword.get(opts, :output_dimensionality) do
+        nil -> request
+        dim -> Map.put(request, :outputDimensionality, dim)
+      end
+
+    request
+  end
+
+  defp make_embedding_request(_model, body, api_key, opts) do
+    headers = [
+      {"x-goog-api-key", api_key},
+      {"content-type", "application/json"}
+    ]
+
+    url = "#{@base_url}/v1beta/models/gemini-embedding-001:embedContent"
+    timeout = Keyword.get(opts, :timeout, 30_000)
+
+    Req.new(headers: headers, receive_timeout: timeout)
+    |> Lume.Circuit.attach_fuse(opts)
+    |> Req.post(url: url, json: body)
+  end
+
+  defp extract_embeddings_from_response(response) do
+    case get_in(response, ["embedding", "values"]) do
+      values when is_list(values) -> values
+      _ -> []
+    end
   end
 
   defp calculate_cost(model, usage) do

@@ -126,10 +126,17 @@ defmodule Lume do
   defp add_content_part(lume, type, content, filename \\ nil, mime_type \\ nil) do
     part =
       case {filename, mime_type} do
-        {nil, nil} -> %{type: type, content: content, id: next_id()}
-        {filename, nil} -> %{type: type, content: content, filename: filename, id: next_id()}
-        {nil, mime_type} -> %{type: type, content: content, mime_type: mime_type, id: next_id()}
-        {filename, mime_type} -> %{type: type, content: content, filename: filename, mime_type: mime_type, id: next_id()}
+        {nil, nil} ->
+          %{type: type, content: content, id: next_id()}
+
+        {filename, nil} ->
+          %{type: type, content: content, filename: filename, id: next_id()}
+
+        {nil, mime_type} ->
+          %{type: type, content: content, mime_type: mime_type, id: next_id()}
+
+        {filename, mime_type} ->
+          %{type: type, content: content, filename: filename, mime_type: mime_type, id: next_id()}
       end
 
     # Add to last user message or create one
@@ -202,11 +209,13 @@ defmodule Lume do
 
     Enum.reduce_while(0..retries, {:error, :all_retries_failed}, fn _, _acc ->
       case attempt.() do
-        {:ok, res} -> 
+        {:ok, res} ->
           {:halt, {:ok, res}}
-        {:error, :missing_api_key} = err -> 
+
+        {:error, :missing_api_key} = err ->
           {:halt, err}
-        {:error, reason} -> 
+
+        {:error, reason} ->
           {:cont, {:error, reason}}
       end
     end)
@@ -218,6 +227,16 @@ defmodule Lume do
     mod.stream(lume)
   rescue
     UndefinedFunctionError -> {:error, :streaming_not_supported}
+  end
+
+  def embeddings(lume, opts \\ [])
+
+  def embeddings(%__MODULE__{provider_module: nil}, _opts), do: {:error, :no_provider}
+
+  def embeddings(%__MODULE__{provider_module: mod} = lume, opts) do
+    mod.embeddings(lume, opts)
+  rescue
+    UndefinedFunctionError -> {:error, :embeddings_not_supported}
   end
 
   def call_async(%__MODULE__{provider_module: nil}), do: {:error, :no_provider}

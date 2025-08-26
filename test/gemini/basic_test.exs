@@ -48,7 +48,6 @@ defmodule Lume.Gemini.BasicTest do
       assert is_binary(result.last_result)
       assert String.length(result.last_result) > 50
     end
-
   end
 
   describe "conversation handling" do
