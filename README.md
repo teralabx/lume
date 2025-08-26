@@ -15,7 +15,19 @@ A minimalistic, fluent AI client library for Elixir with first-class support for
 
 ## 📦 Installation
 
+### GitHub Dependency (Recommended for now)
+
 Add `lume` to your dependencies in `mix.exs`:
+
+```elixir
+def deps do
+  [
+    {:lume, github: "teralabx/lume"}
+  ]
+end
+```
+
+### Hex Package (Coming Soon)
 
 ```elixir
 def deps do
