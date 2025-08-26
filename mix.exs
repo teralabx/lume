@@ -23,8 +23,10 @@ defmodule Lume.MixProject do
     [
       {:jason, "~> 1.4"},
       {:req, "~> 0.5.0"},
+      {:req_fuse, "~> 0.3.2"},
       {:uuid, "~> 1.1"},
-      {:mime, "~> 2.0"}
+      {:mime, "~> 2.0"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 end

@@ -1,6 +1,6 @@
-defmodule Lume.Utils do
+defmodule Lume.Media do
   @moduledoc """
-  Utility functions for file handling and content processing.
+  Media file handling utilities for images, audio, and other file types.
   """
 
   @supported_image_types ~w(.jpg .jpeg .png .gif .webp .bmp)
@@ -79,17 +79,17 @@ defmodule Lume.Utils do
   def process_content(content) when is_binary(content) do
     cond do
       # Already base64 encoded data
-      base64_encoded?(content) -> 
+      base64_encoded?(content) ->
         {:ok, content}
-      
+
       # HTTP/HTTPS URL
       String.starts_with?(content, "http") ->
         {:ok, content}
-      
+
       # Local file path
       File.exists?(content) and (image_file?(content) or audio_file?(content)) ->
         read_file(content)
-        
+
       # Binary string or unknown format - pass through
       true ->
         {:ok, content}

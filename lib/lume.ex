@@ -40,7 +40,7 @@ defmodule Lume do
     opts: []
   ]
 
-  def new(), do: %__MODULE__{}
+  def new, do: %__MODULE__{}
 
   def provider(lume, module) when is_atom(module) do
     %{lume | provider_module: module}
@@ -61,19 +61,21 @@ defmodule Lume do
   def text(lume, content), do: user(lume, content)
 
   def image(lume, content) do
-    case Lume.Utils.process_content(content) do
-      {:ok, processed_data} -> 
+    case Lume.Media.process_content(content) do
+      {:ok, processed_data} ->
         add_content_part(lume, :image, processed_data)
-      {:error, reason} -> 
+
+      {:error, reason} ->
         add_error(lume, "Invalid image content: #{reason}")
     end
   end
 
   def audio(lume, content) do
-    case Lume.Utils.process_content(content) do
-      {:ok, processed_data} -> 
+    case Lume.Media.process_content(content) do
+      {:ok, processed_data} ->
         add_content_part(lume, :audio, processed_data)
-      {:error, reason} -> 
+
+      {:error, reason} ->
         add_error(lume, "Invalid audio content: #{reason}")
     end
   end
@@ -163,6 +165,20 @@ defmodule Lume do
   def call(%__MODULE__{provider_module: nil}), do: {:error, :no_provider}
 
   def call(%__MODULE__{provider_module: mod} = lume) do
+    # Check for async option
+    if Keyword.get(lume.opts, :async, false) do
+      # Delegate to async module
+      callback = Keyword.get(lume.opts, :callback)
+      async_opts = Keyword.take(lume.opts, [:timeout, :supervisor, :on_timeout])
+      Lume.Async.call(lume, callback, async_opts)
+    else
+      # Synchronous execution
+      call_sync(lume, mod)
+    end
+  end
+
+  # Synchronous call implementation (public for async module access)
+  def call_sync(lume, mod) do
     retries = Keyword.get(lume.opts, :retries, 0)
 
     attempt = fn ->
@@ -194,14 +210,10 @@ defmodule Lume do
   def stream(%__MODULE__{provider_module: nil}), do: {:error, :no_provider}
 
   def stream(%__MODULE__{provider_module: mod} = lume) do
-    # Try to call stream, catch if not implemented
-    try do
-      mod.stream(lume)
-    rescue
-      UndefinedFunctionError -> {:error, :streaming_not_supported}
-    end
+    mod.stream(lume)
+  rescue
+    UndefinedFunctionError -> {:error, :streaming_not_supported}
   end
-
 
   def call_async(%__MODULE__{provider_module: nil}), do: {:error, :no_provider}
 

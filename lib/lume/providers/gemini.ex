@@ -31,7 +31,7 @@ defmodule Lume.Providers.Gemini do
          model <- lume.model || "gemini-2.5-flash",
          request <- build_request(lume),
          {:ok, %{status: 200, body: response}} <-
-           make_request(model, "generateContent", request, api_key) do
+           make_request(model, "generateContent", request, api_key, lume.opts) do
       content =
         get_in(response, ["candidates", Access.at(0), "content", "parts", Access.at(0), "text"])
 
@@ -63,7 +63,7 @@ defmodule Lume.Providers.Gemini do
            make_stream_request(model, "streamGenerateContent", request, api_key) do
       stream =
         body
-        |> Stream.map(&decode_sse_chunk/1)
+        |> Stream.map(&Lume.Stream.parse_sse_chunk/1)
         |> Stream.filter(&(&1 != nil))
         |> Stream.map(&extract_content_from_chunk/1)
         |> Stream.filter(&(&1 != nil))
@@ -91,17 +91,19 @@ defmodule Lume.Providers.Gemini do
 
   defp add_generation_config(request, %Lume{opts: opts}) do
     config = %{}
-    
-    config = case Keyword.get(opts, :temperature) do
-      nil -> config
-      temp -> Map.put(config, :temperature, temp)
-    end
-    
-    config = case Keyword.get(opts, :max_tokens) do
-      nil -> config
-      max -> Map.put(config, :maxOutputTokens, max)
-    end
-    
+
+    config =
+      case Keyword.get(opts, :temperature) do
+        nil -> config
+        temp -> Map.put(config, :temperature, temp)
+      end
+
+    config =
+      case Keyword.get(opts, :max_tokens) do
+        nil -> config
+        max -> Map.put(config, :maxOutputTokens, max)
+      end
+
     if config == %{} do
       request
     else
@@ -111,14 +113,17 @@ defmodule Lume.Providers.Gemini do
 
   defp add_structured_output(request, %Lume{opts: opts}) do
     case Keyword.get(opts, :response_schema) do
-      nil -> 
+      nil ->
         request
-      schema -> 
+
+      schema ->
         generation_config = Map.get(request, :generationConfig, %{})
-        updated_config = generation_config
-        |> Map.put(:responseMimeType, "application/json")
-        |> Map.put(:responseSchema, schema)
-        
+
+        updated_config =
+          generation_config
+          |> Map.put(:responseMimeType, "application/json")
+          |> Map.put(:responseSchema, schema)
+
         Map.put(request, :generationConfig, updated_config)
     end
   end
@@ -137,6 +142,9 @@ defmodule Lume.Providers.Gemini do
     end
   end
 
+  defp get_role(:assistant), do: "model"
+  defp get_role(_), do: "user"
+
   defp convert_messages_to_contents(messages, model) do
     messages
     |> Enum.filter(&(&1.role != :system))
@@ -144,19 +152,16 @@ defmodule Lume.Providers.Gemini do
   end
 
   defp convert_message_to_content(%{role: role, content: content}, model) do
-    gemini_role = case role do
-      :user -> "user"
-      :assistant -> "model"
-    end
-    
-    parts = case content do
-      text when is_binary(text) ->
-        [%{text: text}]
-      content_parts when is_list(content_parts) ->
-        Enum.map(content_parts, &convert_content_part(&1, model))
-    end
-    
-    %{role: gemini_role, parts: parts}
+    parts =
+      case content do
+        text when is_binary(text) ->
+          [%{text: text}]
+
+        content_parts when is_list(content_parts) ->
+          Enum.map(content_parts, &convert_content_part(&1, model))
+      end
+
+    %{role: get_role(role), parts: parts}
   end
 
   defp convert_content_part(%{type: :text, content: text}, _model) do
@@ -212,14 +217,17 @@ defmodule Lume.Providers.Gemini do
     end
   end
 
-  defp make_request(model, endpoint, body, api_key) do
+  defp make_request(model, endpoint, body, api_key, opts) do
     headers = [
       {"x-goog-api-key", api_key},
       {"content-type", "application/json"}
     ]
 
     url = "#{@base_url}/v1beta/models/#{model}:#{endpoint}"
-    Req.post(url, json: body, headers: headers)
+
+    Req.new(headers: headers)
+    |> Lume.Circuit.attach_fuse(opts)
+    |> Req.post(url: url, json: body)
   end
 
   defp make_stream_request(model, endpoint, body, api_key) do
@@ -231,15 +239,6 @@ defmodule Lume.Providers.Gemini do
 
     url = "#{@base_url}/v1beta/models/#{model}:#{endpoint}?alt=sse"
     Req.post(url, json: body, headers: headers, into: :self)
-  end
-
-  defp decode_sse_chunk(chunk) do
-    with [_, json_data] <- String.split(chunk, "data: ", parts: 2),
-         {:ok, parsed} <- Jason.decode(json_data) do
-      parsed
-    else
-      _ -> nil
-    end
   end
 
   defp extract_content_from_chunk(chunk) when is_map(chunk) do

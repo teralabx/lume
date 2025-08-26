@@ -35,7 +35,7 @@ defmodule Lume.Providers.OpenAI do
     with {:ok, api_key} <- get_api_key(),
          request <- build_request(lume),
          {:ok, %{status: 200, body: response}} <-
-           make_request("/chat/completions", request, api_key) do
+           make_request("/chat/completions", request, api_key, lume.opts) do
       content = get_in(response, ["choices", Access.at(0), "message", "content"])
       usage = response["usage"]
 
@@ -64,7 +64,7 @@ defmodule Lume.Providers.OpenAI do
            make_stream_request("/chat/completions", request, api_key) do
       stream =
         body
-        |> Stream.map(&decode_sse_chunk/1)
+        |> Stream.map(&Lume.Stream.parse_sse_chunk/1)
         |> Stream.filter(&(&1 != nil))
         |> Stream.take_while(&(&1 != "[DONE]"))
         |> Stream.map(&extract_content_from_chunk/1)
@@ -84,19 +84,22 @@ defmodule Lume.Providers.OpenAI do
   end
 
   defp convert_message_to_openai(%{role: role, content: content}) do
-    openai_role = case role do
-      :system -> "system"
-      :user -> "user"
-      :assistant -> "assistant"
-    end
-    
-    openai_content = case content do
-      text when is_binary(text) ->
-        text
-      content_parts when is_list(content_parts) ->
-        Enum.map(content_parts, &convert_content_part/1)
-    end
-    
+    openai_role =
+      case role do
+        :system -> "system"
+        :user -> "user"
+        :assistant -> "assistant"
+      end
+
+    openai_content =
+      case content do
+        text when is_binary(text) ->
+          text
+
+        content_parts when is_list(content_parts) ->
+          Enum.map(content_parts, &convert_content_part/1)
+      end
+
     %{role: openai_role, content: openai_content}
   end
 
@@ -123,7 +126,6 @@ defmodule Lume.Providers.OpenAI do
 
   defp format_image_data("data:" <> _ = data_url), do: data_url
   defp format_image_data(base64_data), do: "data:image/jpeg;base64,#{base64_data}"
-
 
   defp maybe_add_streaming(request, opts) do
     if Keyword.get(opts, :stream, false) do
@@ -164,13 +166,17 @@ defmodule Lume.Providers.OpenAI do
     end
   end
 
-  defp make_request(path, body, api_key) do
+  defp make_request(path, body, api_key, opts) do
     headers = [
       {"authorization", "Bearer #{api_key}"},
       {"content-type", "application/json"}
     ]
 
-    Req.post("#{@base_url}#{path}", json: body, headers: headers)
+    url = "#{@base_url}#{path}"
+
+    Req.new(headers: headers)
+    |> Lume.Circuit.attach_fuse(opts)
+    |> Req.post(url: url, json: body)
   end
 
   defp make_stream_request(path, body, api_key) do
@@ -181,25 +187,6 @@ defmodule Lume.Providers.OpenAI do
     ]
 
     Req.post("#{@base_url}#{path}", json: body, headers: headers, into: :self)
-  end
-
-  defp decode_sse_chunk(chunk) do
-    chunk
-    |> String.split("\n")
-    |> Enum.find_value(fn line ->
-      if String.starts_with?(line, "data: ") do
-        data = String.slice(line, 6..-1//1)
-
-        if data == "[DONE]" do
-          "[DONE]"
-        else
-          case Jason.decode(data) do
-            {:ok, parsed} -> parsed
-            _ -> nil
-          end
-        end
-      end
-    end)
   end
 
   defp extract_content_from_chunk("[DONE]"), do: nil

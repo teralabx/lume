@@ -12,7 +12,7 @@ defmodule GeminiTest do
     end
 
     test "normal text generation - request building" do
-      lume = 
+      lume =
         Lume.new()
         |> Lume.provider(Gemini)
         |> Lume.model("gemini-2.5-flash")
@@ -20,22 +20,22 @@ defmodule GeminiTest do
         |> Lume.text("Hello, how are you?")
 
       request = Gemini.build_request(lume)
-      
+
       assert request[:contents] == [
-        %{
-          role: "user",
-          parts: [%{text: "Hello, how are you?"}]
-        }
-      ]
-      
+               %{
+                 role: "user",
+                 parts: [%{text: "Hello, how are you?"}]
+               }
+             ]
+
       assert request[:system_instruction] == %{
-        parts: [%{text: "You are a helpful assistant"}]
-      }
+               parts: [%{text: "You are a helpful assistant"}]
+             }
     end
 
     @tag :integration
     test "normal text generation - real API call" do
-      lume = 
+      lume =
         Lume.new()
         |> Lume.provider(Gemini)
         |> Lume.model("gemini-2.5-flash")
@@ -50,8 +50,10 @@ defmodule GeminiTest do
           assert is_binary(result.last_result)
           assert result.cost > 0
           assert result.tokens_used > 0
+
         {:error, :missing_api_key} ->
           IO.puts("Skipping real API test - no API key")
+
         {:error, reason} ->
           flunk("API call failed: #{inspect(reason)}")
       end
@@ -66,7 +68,7 @@ defmodule GeminiTest do
         required: ["greeting"]
       }
 
-      lume = 
+      lume =
         Lume.new()
         |> Lume.provider(Gemini)
         |> Lume.model("gemini-2.5-pro")
@@ -74,7 +76,7 @@ defmodule GeminiTest do
         |> Lume.opts(response_schema: schema)
 
       request = Gemini.build_request(lume)
-      
+
       assert request[:generationConfig][:responseMimeType] == "application/json"
       assert request[:generationConfig][:responseSchema] == schema
     end
@@ -89,7 +91,7 @@ defmodule GeminiTest do
         required: ["greeting"]
       }
 
-      lume = 
+      lume =
         Lume.new()
         |> Lume.provider(Gemini)
         |> Lume.model("gemini-2.5-pro")
@@ -105,8 +107,10 @@ defmodule GeminiTest do
           # Should be valid JSON
           {:ok, json} = Jason.decode(result.last_result)
           assert Map.has_key?(json, "greeting")
+
         {:error, :missing_api_key} ->
           IO.puts("Skipping structured output test - no API key")
+
         {:error, reason} ->
           flunk("Structured output API call failed: #{inspect(reason)}")
       end
@@ -114,24 +118,29 @@ defmodule GeminiTest do
 
     @tag :integration
     test "streaming - real API call" do
-      lume = 
+      lume =
         Lume.new()
         |> Lume.provider(Gemini)
         |> Lume.model("gemini-2.5-flash")
-        |> Lume.text("Tell me a detailed story about a robot learning to paint. Make it at least 100 words and describe each step slowly.")
+        |> Lume.text(
+          "Tell me a detailed story about a robot learning to paint. Make it at least 100 words and describe each step slowly."
+        )
 
       case Gemini.stream(lume) do
         {:ok, stream} ->
           chunks = stream |> Enum.take(20) |> Enum.filter(&(&1 != nil))
           IO.puts("Streaming chunks received: #{length(chunks)}")
-          chunks |> Enum.with_index() |> Enum.each(fn {chunk, i} ->
+
+          chunks
+          |> Enum.with_index()
+          |> Enum.each(fn {chunk, i} ->
             IO.puts("Chunk #{i + 1}: '#{chunk}'")
           end)
-          
+
           # Join all chunks to see full response
           full_response = Enum.join(chunks, "")
           IO.puts("Full response: #{full_response}")
-          
+
           assert length(chunks) > 0
           assert Enum.all?(chunks, &is_binary/1)
           # For a longer story, we should get multiple chunks
@@ -140,8 +149,10 @@ defmodule GeminiTest do
           else
             IO.puts("⚠ Only got one chunk - response might be too short for streaming")
           end
+
         {:error, :missing_api_key} ->
           IO.puts("Skipping streaming test - no API key")
+
         {:error, reason} ->
           flunk("Streaming API call failed: #{inspect(reason)}")
       end
@@ -149,8 +160,8 @@ defmodule GeminiTest do
 
     test "image processing - request building" do
       image_data = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2w=="
-      
-      lume = 
+
+      lume =
         Lume.new()
         |> Lume.provider(Gemini)
         |> Lume.model("gemini-2.5-flash")
@@ -160,19 +171,19 @@ defmodule GeminiTest do
       request = Gemini.build_request(lume)
       user_content = hd(request[:contents])
       parts = user_content[:parts]
-      
+
       assert length(parts) == 2
-      
+
       text_part = Enum.find(parts, &Map.has_key?(&1, :text))
       assert text_part[:text] == "What do you see in this image?"
-      
+
       image_part = Enum.find(parts, &Map.has_key?(&1, :inline_data))
       assert image_part[:inline_data][:mime_type] == "image/jpeg"
       assert image_part[:inline_data][:data] == "/9j/4AAQSkZJRgABAQAAAQABAAD/2w=="
     end
 
     test "audio processing - request building" do
-      lume = 
+      lume =
         Lume.new()
         |> Lume.provider(Gemini)
         |> Lume.text("Analyze this audio")
@@ -181,29 +192,30 @@ defmodule GeminiTest do
       request = Gemini.build_request(lume)
       user_content = hd(request[:contents])
       parts = user_content[:parts]
-      
-      audio_part = Enum.find(parts, fn part ->
-        Map.get(part, :text) == "[Audio not yet supported]"
-      end)
-      
+
+      audio_part =
+        Enum.find(parts, fn part ->
+          Map.get(part, :text) == "[Audio not yet supported]"
+        end)
+
       assert audio_part != nil
     end
 
     test "generation config - temperature and max tokens" do
-      lume = 
+      lume =
         Lume.new()
         |> Lume.provider(Gemini)
         |> Lume.text("Generate creative content")
         |> Lume.opts(temperature: 0.8, max_tokens: 1000)
 
       request = Gemini.build_request(lume)
-      
+
       assert request[:generationConfig][:temperature] == 0.8
       assert request[:generationConfig][:maxOutputTokens] == 1000
     end
 
     test "conversation history - multiple messages" do
-      lume = 
+      lume =
         Lume.new()
         |> Lume.provider(Gemini)
         |> Lume.system("You are a math tutor")
@@ -214,14 +226,14 @@ defmodule GeminiTest do
         content: "2 + 2 equals 4",
         id: "test-id"
       }
-      
+
       lume_with_history = %{lume | messages: lume.messages ++ [assistant_message]}
       lume_with_followup = Lume.text(lume_with_history, "What about 3 + 3?")
 
       request = Gemini.build_request(lume_with_followup)
-      
+
       assert request[:system_instruction][:parts] == [%{text: "You are a math tutor"}]
-      
+
       contents = request[:contents]
       assert length(contents) == 3
       assert Enum.at(contents, 0)[:role] == "user"
